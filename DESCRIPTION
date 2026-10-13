@@ -1,0 +1,21 @@
+Package: FlaSB
+Title: Extração de dados do StatsBomb
+Version: 0.0.0.9000
+Authors@R: 
+    person("William", "Amorim", , "wamorim.estatistica@flamengo.com.br", role = c("aut", "cre"))
+Description: Pacote com funções que fazem a extração de dados da API do StatsBomb, retornando as tabelas com o modelo adotado pelo Flamengo.
+License: file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    dplyr,
+    getPass,
+    httr2 (>= 1.1.0),
+    jsonlite,
+    tibble,
+    utils
+Suggests:
+    testthat (>= 3.0.0),
+    withr
+Config/testthat/edition: 3
