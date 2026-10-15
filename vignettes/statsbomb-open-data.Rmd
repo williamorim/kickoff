@@ -1,0 +1,326 @@
+---
+title: "StatsBomb Open Data"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{StatsBomb Open Data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 4.5,
+  # The vignette downloads data from GitHub
+  eval = curl::has_internet()
+)
+```
+
+StatsBomb makes part of its data freely available in the
+[StatsBomb Open Data](https://github.com/hudl/open-data) repository. It covers
+around 4,000 matches, such as the FIFA World Cups of 2018 and 2022, the UEFA
+Euros of 2020 and 2024, Lionel Messi's La Liga matches and several women's
+competitions. Some matches also have StatsBomb 360 data.
+
+The `sb_open_*()` functions download this data without credentials and return
+tibbles with the same structure as the functions that access the paid API
+(`sb_get_*()`), so the same code works with both sources.
+
+| Open data function | Paid API equivalent | What it returns |
+|---|---|---|
+| `sb_open_competitions()` | `sb_get_competitions()` | Competitions and seasons available |
+| `sb_open_matches()` | `sb_get_matches()` | Matches of one or more competitions/seasons |
+| `sb_open_events()` | `sb_get_events()` | Events of one or more matches |
+| `sb_open_lineups()` | `sb_get_lineups()` | Lineups of one or more matches |
+| `sb_open_360()` | `sb_get_360()` | 360 freeze frames of one or more matches |
+
+## Terms of use
+
+The open data is provided under the
+[StatsBomb Public Data User Agreement](https://github.com/hudl/open-data/blob/master/LICENSE.pdf):
+
+- any published analysis must **credit StatsBomb** as the data source and use
+  the StatsBomb logo, available in its [media pack](https://statsbomb.com/media-pack/);
+- the data **cannot be redistributed or used commercially**.
+
+For this reason the package does not include any data: it is always downloaded
+from the official repository. The first `sb_open_*()` call of each session
+shows a reminder of these terms.
+
+```{r setup}
+library(FlaSB)
+library(dplyr, warn.conflicts = FALSE)
+```
+
+## Competitions
+
+`sb_open_competitions()` lists every competition and season available.
+
+```{r competitions}
+competitions <- sb_open_competitions()
+
+competitions |>
+  select(competition_id, season_id, competition_name, season_name, match_available_360)
+```
+
+The column `match_available_360` is filled in when the season has 360 data:
+
+```{r competitions-360}
+competitions |>
+  filter(!is.na(match_available_360)) |>
+  select(competition_name, season_name)
+```
+
+The `competition_id` and `season_id` of a season are what you need to get its
+matches. Filter the competitions by name:
+
+```{r world-cup}
+world_cup_2022 <- competitions |>
+  filter(competition_name == "FIFA World Cup", season_name == "2022")
+
+world_cup_2022 |>
+  select(competition_id, season_id, competition_name, season_name)
+```
+
+## Matches
+
+`sb_open_matches()` takes a data frame with the columns `competition_id` and
+`season_id`, usually filtered from `sb_open_competitions()`. Each row is a
+competition/season, so you can get several of them at once.
+
+```{r matches}
+matches <- sb_open_matches(world_cup_2022)
+
+matches |>
+  select(
+    match_id, match_date, competition_stage.name,
+    home_team.home_team_name, home_score, away_score, away_team.away_team_name
+  ) |>
+  arrange(match_date)
+```
+
+Nested fields of the JSON are flattened into columns separated by a dot, such
+as `home_team.home_team_name` or `competition_stage.name`. The column
+`match_status_360` says whether the match has 360 data.
+
+```{r final}
+final <- matches |>
+  filter(competition_stage.name == "Final")
+
+final |>
+  select(match_id, home_team.home_team_name, away_team.away_team_name, match_status_360)
+```
+
+## Events
+
+`sb_open_events()` takes a vector of match ids or a data frame with the column
+`match_id`, such as the output of `sb_open_matches()`. It returns one row per
+event, with the column `match_id` added at the start.
+
+```{r events}
+events <- sb_open_events(final)
+
+dim(events)
+```
+
+Each event has a type (`type.name`) and, depending on the type, its own
+columns with a prefix, such as `pass.*`, `shot.*` or `carry.*`:
+
+```{r event-types}
+events |>
+  count(type.name, sort = TRUE)
+```
+
+Fields that hold arrays are kept as list columns. The most common are
+`location` and the end locations of passes, carries and shots, which hold
+`c(x, y)` coordinates on a 120 x 80 pitch:
+
+```{r locations}
+events$location[[10]]
+```
+
+### Shots
+
+As an example, here are the shots of the final with their expected goals
+(xG). Period 5 is the penalty shootout, so it is left out.
+
+```{r shots}
+shots <- events |>
+  filter(type.name == "Shot", period < 5) |>
+  mutate(
+    x = vapply(location, `[`, numeric(1), 1),
+    y = vapply(location, `[`, numeric(1), 2)
+  )
+
+shots |>
+  group_by(team.name) |>
+  summarise(shots = n(), goals = sum(shot.outcome.name == "Goal"), xg = sum(shot.statsbomb_xg))
+```
+
+```{r shot-map, eval = curl::has_internet() && requireNamespace("ggplot2", quietly = TRUE)}
+library(ggplot2)
+
+shots |>
+  mutate(goal = shot.outcome.name == "Goal") |>
+  ggplot(aes(x, y, size = shot.statsbomb_xg, colour = team.name, shape = goal)) +
+  annotate("rect", xmin = 60, xmax = 120, ymin = 0, ymax = 80, fill = NA, colour = "grey50") +
+  annotate("rect", xmin = 102, xmax = 120, ymin = 18, ymax = 62, fill = NA, colour = "grey50") +
+  annotate("rect", xmin = 114, xmax = 120, ymin = 30, ymax = 50, fill = NA, colour = "grey50") +
+  geom_point(alpha = 0.7) +
+  scale_y_reverse() +
+  scale_shape_manual(values = c(`FALSE` = 1, `TRUE` = 16)) +
+  coord_fixed(xlim = c(60, 120)) +
+  labs(
+    title = "Shots in the 2022 World Cup final",
+    size = "xG", colour = NULL, shape = "Goal",
+    caption = "Data: StatsBomb"
+  ) +
+  theme_void()
+```
+
+StatsBomb coordinates are always relative to the team in possession, which
+attacks from left to right, so the shots of both teams are on the same side of
+the pitch without any transformation. The y axis is reversed because the
+coordinates start at the top-left corner of the pitch.
+
+## Lineups
+
+`sb_open_lineups()` returns one row per team and match. The players are in the
+list column `lineup`, which can be expanded with `tidyr::unnest()`:
+
+```{r lineups}
+lineups <- sb_open_lineups(final)
+
+lineups |>
+  select(match_id, team_id, team_name, lineup)
+```
+
+```{r lineups-players, eval = curl::has_internet() && requireNamespace("tidyr", quietly = TRUE)}
+players <- lineups |>
+  tidyr::unnest(lineup)
+
+players |>
+  select(team_name, player_name, player_nickname, jersey_number, country.name)
+```
+
+Each player has the list column `positions`, with the positions played and the
+time on the pitch in each one. Players without positions did not play.
+Expanding it shows the starting lineups and the substitutions:
+
+```{r positions, eval = curl::has_internet() && requireNamespace("tidyr", quietly = TRUE)}
+positions <- players |>
+  select(team_name, player_name, positions) |>
+  tidyr::unnest(positions)
+
+positions |>
+  filter(start_reason == "Starting XI") |>
+  select(team_name, player_name, position, from, to, end_reason)
+```
+
+## 360 frames
+
+`sb_open_360()` returns one row per event with 360 data. Not every match has
+it: check `match_status_360` in the output of `sb_open_matches()`.
+
+```{r frames}
+frames <- sb_open_360(final)
+
+frames
+```
+
+Each row has:
+
+- `event_uuid`: the event id, which matches the column `id` of the events;
+- `visible_area`: the polygon of the pitch visible in the broadcast footage,
+  as a vector `c(x1, y1, x2, y2, ...)`;
+- `freeze_frame`: a data frame with the players visible at the moment of the
+  event, with their `location` and whether they are a `teammate` of the actor,
+  the `actor` themselves or a `keeper`.
+
+The frames are joined to the events by `event_uuid` and `id`. As an example,
+here is the freeze frame of Ángel Di María's goal:
+
+```{r di-maria}
+goal <- shots |>
+  filter(shot.outcome.name == "Goal", player.name == "Ángel Fabián Di María Hernández")
+
+goal_frame <- frames |>
+  filter(event_uuid == goal$id)
+
+freeze_frame <- goal_frame$freeze_frame[[1]] |>
+  mutate(
+    x = vapply(location, `[`, numeric(1), 1),
+    y = vapply(location, `[`, numeric(1), 2),
+    player = case_when(actor ~ "Shooter", teammate ~ "Teammate", keeper ~ "Keeper", TRUE ~ "Opponent")
+  )
+
+visible_area <- matrix(goal_frame$visible_area[[1]], ncol = 2, byrow = TRUE) |>
+  as.data.frame() |>
+  setNames(c("x", "y"))
+```
+
+```{r di-maria-plot, eval = curl::has_internet() && requireNamespace("ggplot2", quietly = TRUE)}
+ggplot(freeze_frame, aes(x, y)) +
+  geom_polygon(data = visible_area, fill = "grey90") +
+  annotate("rect", xmin = 0, xmax = 120, ymin = 0, ymax = 80, fill = NA, colour = "grey50") +
+  annotate("rect", xmin = 102, xmax = 120, ymin = 18, ymax = 62, fill = NA, colour = "grey50") +
+  annotate("segment", x = goal$x, y = goal$y, xend = 120, yend = 40, linetype = "dashed") +
+  geom_point(aes(colour = player), size = 3) +
+  scale_y_reverse() +
+  coord_fixed() +
+  labs(
+    title = "Di María's goal (36'), 2022 World Cup final",
+    subtitle = "Players visible at the moment of the shot. Grey area: visible pitch",
+    colour = NULL,
+    caption = "Data: StatsBomb 360"
+  ) +
+  theme_void()
+```
+
+## Several matches at once
+
+All `sb_open_*()` functions accept several matches or competitions and
+download them in parallel, combining the results in a single tibble. The
+column `match_id` identifies the match of each row.
+
+```{r several}
+knockout <- matches |>
+  filter(competition_stage.name %in% c("Semi-finals", "Final"))
+
+knockout_events <- sb_open_events(knockout)
+
+knockout_events |>
+  count(match_id)
+```
+
+Matches without data, such as a match without 360 data or an id that does not
+exist, return no rows and generate a single warning listing them:
+
+```{r warning}
+frames <- sb_open_360(c(3869685, 12345678))
+
+unique(frames$match_id)
+```
+
+An events file is around 3 MB, so downloading whole competitions can take a
+while. The number of simultaneous downloads can be changed with
+`options(statsbomb.max_active = )` (default is 5).
+
+## Differences from the paid API
+
+The open data files are exported from the StatsBomb API, so the column names
+are the same as in the `sb_get_*()` functions. However, some data is not
+included:
+
+- **matches** come without attendance and collection status columns;
+- **events** come without the On-Ball Value (OBV) columns and other derived
+  columns, such as `is_transition` and `possession_directness`;
+- **lineups** come without formations, height and weight;
+- **360 frames** come without the 360 metrics, such as `line_breaking_pass`;
+- **player and team stats** and the **player mapping** are not available.
+
+Code written for the open data works with the paid API data, which only adds
+columns. The opposite is not always true: code that uses, for example, the OBV
+columns needs the paid API.
