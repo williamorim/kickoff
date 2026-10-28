@@ -1,4 +1,4 @@
 library(testthat)
-library(FlaSB)
+library(kickoff)
 
-test_check("FlaSB")
+test_check("kickoff")

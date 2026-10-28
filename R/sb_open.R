@@ -171,7 +171,7 @@ sb_open_request <- function(path) {
   getOption("statsbomb.open_data_url", "https://raw.githubusercontent.com/hudl/open-data/master/data/") |>
     httr2::request() |>
     httr2::req_url_path_append(path) |>
-    httr2::req_user_agent("FlaSB (R package)") |>
+    httr2::req_user_agent("kickoff (R package)") |>
     httr2::req_retry(max_tries = 3) |>
     # 404 means the file does not exist (e.g. a match without 360 data)
     httr2::req_error(is_error = function(resp) {

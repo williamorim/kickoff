@@ -50,7 +50,7 @@ from the official repository. The first `sb_open_*()` call of each session
 shows a reminder of these terms.
 
 ```{r setup}
-library(FlaSB)
+library(kickoff)
 library(dplyr, warn.conflicts = FALSE)
 ```
 

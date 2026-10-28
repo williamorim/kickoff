@@ -150,7 +150,7 @@ sb_request <- function(version, path, query = list()) {
     httr2::req_url_path_append(version, path) |>
     httr2::req_url_query(!!!query) |>
     httr2::req_auth_basic(sb_creds$username, sb_creds$password) |>
-    httr2::req_user_agent("FlaSB (R package)") |>
+    httr2::req_user_agent("kickoff (R package)") |>
     httr2::req_retry(max_tries = 3) |>
     # 404 means "no data" for some endpoints (e.g. player-mapping)
     httr2::req_error(
